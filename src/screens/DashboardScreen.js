@@ -6,7 +6,8 @@ import {
   ScrollView, 
   TouchableOpacity,
   SafeAreaView,
-  StatusBar
+  StatusBar,
+  Platform
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -26,9 +27,19 @@ import {
 
 export default function DashboardScreen() {
   const progressPercentage = (userProfile.points / userProfile.nextLevel) * 100;
+  const topInset = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
+  const bottomInset = Platform.OS === 'android' ? 24 : 16;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView
+      style={[
+        styles.container,
+        {
+          paddingTop: topInset + 8,
+          paddingBottom: 2 * bottomInset,
+        },
+      ]}
+    >
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
       
       {/* Header */}
