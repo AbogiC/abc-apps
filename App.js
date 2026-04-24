@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { Feather } from '@expo/vector-icons';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { onAuthStateChanged } from 'firebase/auth';
 import { Colors } from './src/theme/colors';
+import { auth } from './src/services/firebaseService';
+import AuthScreen from './src/screens/AuthScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
 import NotesScreen from './src/screens/NotesScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
@@ -27,7 +30,37 @@ const screens = {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [currentUser, setCurrentUser] = useState(auth.currentUser);
+  const [authReady, setAuthReady] = useState(false);
   const ActiveScreen = screens[activeTab];
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setAuthReady(true);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  if (!authReady) {
+    return (
+      <View style={styles.loadingShell}>
+        <StatusBar style="light" />
+        <ActivityIndicator color={Colors.gold} size="large" />
+        <Text style={styles.loadingText}>Loading your workspace...</Text>
+      </View>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <>
+        <StatusBar style="light" />
+        <AuthScreen />
+      </>
+    );
+  }
 
   return (
     <View style={styles.app}>
@@ -69,6 +102,18 @@ const styles = StyleSheet.create({
   app: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  loadingShell: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background,
+    gap: 14,
+  },
+  loadingText: {
+    color: Colors.gray,
+    fontSize: 14,
+    fontWeight: '500',
   },
   screenArea: {
     flex: 1,
