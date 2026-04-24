@@ -12,23 +12,6 @@ function calendarCollectionRef(uid) {
   return collection(db, 'users', uid, CALENDAR_COLLECTION);
 }
 
-function toIsoDate(value) {
-  if (!value) {
-    return '';
-  }
-
-  if (typeof value === 'string') {
-    return value.slice(0, 10);
-  }
-
-  if (value.toDate) {
-    return value.toDate().toISOString().slice(0, 10);
-  }
-
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
-}
-
 function toTimeString(value) {
   if (!value) {
     return '09:00';
@@ -46,14 +29,65 @@ function toTimeString(value) {
   return '09:00';
 }
 
+function toDateObject(value, timeValue = '') {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  if (typeof value === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      const [year, month, day] = value.split('-').map((segment) => Number(segment));
+      const date = new Date(year, month - 1, day);
+
+      if (timeValue && /^\d{2}:\d{2}$/.test(timeValue)) {
+        const [hours, minutes] = timeValue.split(':').map((segment) => Number(segment));
+        date.setHours(hours, minutes, 0, 0);
+      }
+
+      return date;
+    }
+
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  if (typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+
+  if (typeof value.seconds === 'number') {
+    return new Date(value.seconds * 1000 + Math.floor((value.nanoseconds ?? 0) / 1e6));
+  }
+
+  return null;
+}
+
+function toDateKey(value, timeValue = '') {
+  const date = toDateObject(value, timeValue);
+  if (!date) {
+    return '';
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export function normalizeCalendarEvent(item = {}) {
+  const startAt = toDateObject(item.startAt) ?? toDateObject(item.date, item.time);
+
   return {
     id: item.id ?? '',
     title: item.title ?? '',
     detail: item.detail ?? '',
-    date: toIsoDate(item.date),
+    date: toDateKey(item.date ?? startAt, item.time),
     time: toTimeString(item.time),
-    startAt: item.startAt ?? null,
+    startAt,
     createdAt: item.createdAt ?? null,
     updatedAt: item.updatedAt ?? null,
     userId: item.userId ?? '',
@@ -84,13 +118,15 @@ export function listenToCalendarEvents(uid, onChange, onError) {
 }
 
 export async function createCalendarEvent(uid, event) {
+  const startAt = toDateObject(event.startAt ?? event.date, event.time);
+
   const payload = {
     title: event.title.trim(),
     detail: event.detail.trim(),
-    date: event.date,
+    date: startAt,
     time: event.time,
     userId: uid,
-    startAt: event.startAt ?? null,
+    startAt,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -104,13 +140,15 @@ export async function updateCalendarEvent(uid, eventId, event) {
     throw new Error('Missing calendar event id.');
   }
 
+  const startAt = toDateObject(event.startAt ?? event.date, event.time);
+
   const payload = {
     title: event.title.trim(),
     detail: event.detail.trim(),
-    date: event.date,
+    date: startAt,
     time: event.time,
     userId: uid,
-    startAt: event.startAt ?? null,
+    startAt,
     updatedAt: serverTimestamp(),
   };
 

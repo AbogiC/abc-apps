@@ -1,34 +1,176 @@
-import React from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  ScrollView, 
-  TouchableOpacity,
+import React, { useEffect, useMemo, useState } from 'react';
+import {
   SafeAreaView,
+  ScrollView,
   StatusBar,
-  Platform
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  Platform,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Colors } from '../theme/colors';
+import { onAuthStateChanged } from 'firebase/auth';
+
 import DashboardCard from '../components/DashboardCard';
-import StatCard from '../components/StatCard';
-import ActivityItem from '../components/ActivityItem';
-import ChartView from '../components/ChartView';
-import { 
-  userProfile, 
-  statsData, 
-  recentActivities, 
-  chartData,
-  quickActions,
-  goals 
-} from '../data/sampleData';
+import { Colors } from '../theme/colors';
+import { auth } from '../services/firebaseService';
+import { getTasks } from '../services/notesTaskStorageService';
+import { getContemplations } from '../services/contemplationStorageService';
+import { listenToCalendarEvents } from '../services/calendarService';
+
+const PRIORITY_ORDER = ['High', 'Medium', 'Low'];
+
+function getInitials(name = '') {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return '?';
+  }
+
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('');
+}
+
+function toDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function isSameOrAfter(a, b) {
+  return new Date(a).getTime() >= new Date(b).getTime();
+}
+
+function isSameOrBefore(a, b) {
+  return new Date(a).getTime() <= new Date(b).getTime();
+}
+
+function formatEventDate(value) {
+  if (!value) {
+    return '';
+  }
+
+  const date = new Date(value);
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+}
 
 export default function DashboardScreen() {
-  const progressPercentage = (userProfile.points / userProfile.nextLevel) * 100;
   const topInset = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
   const bottomInset = Platform.OS === 'android' ? 24 : 16;
+
+  const [currentUser, setCurrentUser] = useState(auth.currentUser);
+  const [tasks, setTasks] = useState([]);
+  const [upcomingEvents, setUpcomingEvents] = useState([]);
+  const [latestContemplation, setLatestContemplation] = useState(null);
+  const [loadingTasks, setLoadingTasks] = useState(true);
+  const [loadingContemplations, setLoadingContemplations] = useState(true);
+
+  const displayName = currentUser?.displayName?.trim() || currentUser?.email?.split('@')?.[0] || '';
+  const showWelcomeBack = Boolean(currentUser);
+
+  const taskCounts = useMemo(() => {
+    const counts = { High: 0, Medium: 0, Low: 0 };
+
+    tasks.forEach((task) => {
+      if (counts[task.priority] !== undefined) {
+        counts[task.priority] += 1;
+      }
+    });
+
+    return PRIORITY_ORDER.map((priority) => ({
+      priority,
+      count: counts[priority] ?? 0,
+    }));
+  }, [tasks]);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadLocalData = async () => {
+      try {
+        setLoadingTasks(true);
+        const nextTasks = await getTasks();
+        if (mounted) {
+          setTasks(nextTasks);
+        }
+      } finally {
+        if (mounted) {
+          setLoadingTasks(false);
+        }
+      }
+
+      try {
+        setLoadingContemplations(true);
+        const contemplations = await getContemplations();
+        if (mounted) {
+          setLatestContemplation(contemplations[0] ?? null);
+        }
+      } finally {
+        if (mounted) {
+          setLoadingContemplations(false);
+        }
+      }
+    };
+
+    loadLocalData();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setUpcomingEvents([]);
+      return undefined;
+    }
+
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    const oneMonthLater = new Date(now);
+    oneMonthLater.setMonth(oneMonthLater.getMonth() + 1);
+
+    const unsubscribe = listenToCalendarEvents(
+      currentUser.uid,
+      (events) => {
+        const filteredEvents = events
+          .filter((event) => {
+            if (!event.startAt) {
+              return false;
+            }
+
+            return isSameOrAfter(event.startAt, now) && isSameOrBefore(event.startAt, oneMonthLater);
+          })
+          .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
+          .slice(0, 5);
+
+        setUpcomingEvents(filteredEvents);
+      },
+      () => {
+        setUpcomingEvents([]);
+      }
+    );
+
+    return unsubscribe;
+  }, [currentUser?.uid]);
 
   return (
     <SafeAreaView
@@ -41,8 +183,7 @@ export default function DashboardScreen() {
       ]}
     >
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
-      
-      {/* Header */}
+
       <LinearGradient
         colors={[Colors.primary, Colors.secondary]}
         style={styles.header}
@@ -50,9 +191,9 @@ export default function DashboardScreen() {
         end={{ x: 1, y: 1 }}
       >
         <View style={styles.headerTop}>
-          <View>
-            <Text style={styles.greeting}>Welcome back,</Text>
-            <Text style={styles.name}>{userProfile.name}</Text>
+          <View style={styles.headerCopy}>
+            <Text style={styles.greeting}>{showWelcomeBack ? 'Welcome back,' : 'Welcome!'}</Text>
+            {showWelcomeBack ? <Text style={styles.name}>{displayName || 'User'}</Text> : null}
           </View>
           <View style={styles.headerIcons}>
             <TouchableOpacity style={styles.iconButton}>
@@ -61,93 +202,77 @@ export default function DashboardScreen() {
             </TouchableOpacity>
             <TouchableOpacity style={styles.avatarContainer}>
               <Text style={styles.avatarText}>
-                {userProfile.name.split(' ').map(n => n[0]).join('')}
+                {showWelcomeBack ? getInitials(displayName || currentUser?.email || '') : '!'}
               </Text>
             </TouchableOpacity>
-          </View>
-        </View>
-        
-        {/* Level Progress */}
-        <View style={styles.levelContainer}>
-          <View style={styles.levelInfo}>
-            <View style={styles.levelBadge}>
-              <Feather name="award" size={16} color={Colors.gold} />
-              <Text style={styles.levelText}>{userProfile.level}</Text>
-            </View>
-            <Text style={styles.pointsText}>{userProfile.points.toLocaleString()} / {userProfile.nextLevel.toLocaleString()} pts</Text>
-          </View>
-          <View style={styles.progressBar}>
-            <View style={[styles.progressFill, { width: `${progressPercentage}%` }]} />
           </View>
         </View>
       </LinearGradient>
 
-      <ScrollView 
-        style={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Quick Actions */}
-        <View style={styles.quickActions}>
-          {quickActions.map(action => (
-            <TouchableOpacity key={action.id} style={styles.actionButton}>
-              <View style={[styles.actionIcon, { backgroundColor: `${action.color}20` }]}>
-                <Feather name={action.icon} size={20} color={action.color} />
-              </View>
-              <Text style={styles.actionText}>{action.title}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Stats Grid */}
-        <Text style={styles.sectionTitle}>Overview</Text>
-        <View style={styles.statsGrid}>
-          {statsData.map(stat => (
-            <StatCard key={stat.id} {...stat} />
-          ))}
-        </View>
-
-        {/* Performance Chart */}
-        <DashboardCard title="Performance Analytics">
-          <ChartView data={chartData} />
-        </DashboardCard>
-
-        {/* Goals */}
-        <DashboardCard title="Goals & Progress">
-          {goals.map(goal => (
-            <View key={goal.id} style={styles.goalItem}>
-              <View style={styles.goalHeader}>
-                <Text style={styles.goalTitle}>{goal.title}</Text>
-                <Text style={styles.goalProgress}>
-                  {Math.round((goal.current / goal.target) * 100)}%
-                </Text>
-              </View>
-              <View style={styles.goalBar}>
-                <View 
-                  style={[
-                    styles.goalBarFill, 
-                    { 
-                      width: `${(goal.current / goal.target) * 100}%`,
-                      backgroundColor: goal.color 
-                    }
-                  ]} 
-                />
-              </View>
-              <Text style={styles.goalNumbers}>
-                {goal.current.toLocaleString()} / {goal.target.toLocaleString()}
-              </Text>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <DashboardCard title="Task Preview">
+          {loadingTasks ? (
+            <Text style={styles.helperText}>Loading tasks...</Text>
+          ) : (
+            <View style={styles.priorityList}>
+              {taskCounts.map((item) => (
+                <View key={item.priority} style={styles.priorityRow}>
+                  <View style={styles.priorityDotWrap}>
+                    <View
+                      style={[
+                        styles.priorityDot,
+                        item.priority === 'High'
+                          ? styles.priorityDotHigh
+                          : item.priority === 'Medium'
+                            ? styles.priorityDotMedium
+                            : styles.priorityDotLow,
+                      ]}
+                    />
+                    <Text style={styles.priorityLabel}>{item.priority}</Text>
+                  </View>
+                  <Text style={styles.priorityCount}>{item.count} task{item.count === 1 ? '' : 's'}</Text>
+                </View>
+              ))}
             </View>
-          ))}
+          )}
         </DashboardCard>
 
-        {/* Recent Activities */}
-        <DashboardCard title="Recent Activities">
-          {recentActivities.map(activity => (
-            <ActivityItem key={activity.id} {...activity} />
-          ))}
-          <TouchableOpacity style={styles.viewAllButton}>
-            <Text style={styles.viewAllText}>View All Activities</Text>
-            <Feather name="arrow-right" size={16} color={Colors.gold} />
-          </TouchableOpacity>
+        <DashboardCard title="Upcoming Events">
+          {!currentUser ? (
+            <Text style={styles.helperText}>You need to login to see upcoming event!</Text>
+          ) : upcomingEvents.length === 0 ? (
+            <Text style={styles.helperText}>No upcoming events in the next month.</Text>
+          ) : (
+            upcomingEvents.map((event) => (
+              <View key={event.id} style={styles.eventRow}>
+                <View style={styles.eventDot} />
+                <View style={styles.eventBody}>
+                  <Text style={styles.eventTitle}>{event.title}</Text>
+                  <Text style={styles.eventMeta}>
+                    {formatEventDate(event.startAt)}{event.detail ? ` • ${event.detail}` : ''}
+                  </Text>
+                </View>
+              </View>
+            ))
+          )}
+        </DashboardCard>
+
+        <DashboardCard title="Last Contemplation">
+          {loadingContemplations ? (
+            <Text style={styles.helperText}>Loading contemplation...</Text>
+          ) : latestContemplation ? (
+            <View>
+              <View style={styles.contemplationHeader}>
+                <Text style={styles.contemplationTitle}>{latestContemplation.title}</Text>
+                <View style={styles.contemplationBadge}>
+                  <Text style={styles.contemplationBadgeText}>{latestContemplation.mood}</Text>
+                </View>
+              </View>
+              <Text style={styles.contemplationBody}>{latestContemplation.contemplation}</Text>
+            </View>
+          ) : (
+            <Text style={styles.helperText}>No contemplation saved yet.</Text>
+          )}
         </DashboardCard>
 
         <View style={styles.bottomSpacer} />
@@ -172,7 +297,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 25,
+  },
+  headerCopy: {
+    flex: 1,
+    paddingRight: 16,
   },
   greeting: {
     color: Colors.gray,
@@ -215,128 +343,109 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  levelContainer: {
-    marginTop: 5,
-  },
-  levelInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  levelBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(212, 175, 55, 0.1)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    gap: 6,
-  },
-  levelText: {
-    color: Colors.gold,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  pointsText: {
-    color: Colors.gray,
-    fontSize: 12,
-  },
-  progressBar: {
-    height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: Colors.gold,
-    borderRadius: 3,
-  },
   content: {
     flex: 1,
     paddingHorizontal: 20,
     paddingTop: 20,
   },
-  quickActions: {
+  helperText: {
+    color: Colors.gray,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  priorityList: {
+    gap: 12,
+  },
+  priorityRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 25,
-  },
-  actionButton: {
-    alignItems: 'center',
-    gap: 8,
-  },
-  actionIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    justifyContent: 'center',
     alignItems: 'center',
   },
-  actionText: {
+  priorityDotWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  priorityDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  priorityDotHigh: {
+    backgroundColor: Colors.warning,
+  },
+  priorityDotMedium: {
+    backgroundColor: Colors.gold,
+  },
+  priorityDotLow: {
+    backgroundColor: Colors.success,
+  },
+  priorityLabel: {
+    color: Colors.white,
+    fontSize: 14,
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  priorityCount: {
+    color: Colors.gray,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  eventRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'flex-start',
+    marginBottom: 14,
+  },
+  eventDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.gold,
+    marginTop: 5,
+  },
+  eventBody: {
+    flex: 1,
+  },
+  eventTitle: {
+    color: Colors.white,
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  eventMeta: {
     color: Colors.gray,
     fontSize: 12,
-    fontWeight: '500',
+    lineHeight: 18,
   },
-  sectionTitle: {
-    color: Colors.white,
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 16,
-    letterSpacing: 0.5,
-  },
-  statsGrid: {
+  contemplationHeader: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
     marginBottom: 10,
   },
-  goalItem: {
-    marginBottom: 20,
-  },
-  goalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  goalTitle: {
+  contemplationTitle: {
+    flex: 1,
     color: Colors.white,
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '700',
   },
-  goalProgress: {
+  contemplationBadge: {
+    backgroundColor: 'rgba(212, 175, 55, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  contemplationBadgeText: {
     color: Colors.gold,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  goalBar: {
-    height: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 6,
-  },
-  goalBarFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  goalNumbers: {
-    color: Colors.gray,
     fontSize: 11,
+    fontWeight: '700',
   },
-  viewAllButton: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 12,
-    paddingVertical: 12,
-  },
-  viewAllText: {
-    color: Colors.gold,
-    fontSize: 14,
-    fontWeight: '600',
+  contemplationBody: {
+    color: Colors.gray,
+    fontSize: 13,
+    lineHeight: 19,
   },
   bottomSpacer: {
     height: 30,
