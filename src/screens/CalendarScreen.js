@@ -25,6 +25,10 @@ import {
 } from '../services/calendarService';
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_LABELS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
 
 function pad(value) {
   return String(value).padStart(2, '0');
@@ -39,26 +43,31 @@ function parseDateKey(dateKey) {
   return new Date(year, month - 1, day);
 }
 
-function startOfWeek(date) {
-  const copy = new Date(date);
-  const day = copy.getDay();
-  const diff = (day + 6) % 7;
-  copy.setDate(copy.getDate() - diff);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
-}
-
-function buildWeekDays(anchorDate) {
-  const weekStart = startOfWeek(anchorDate);
-  return Array.from({ length: 7 }, (_, index) => {
-    const next = new Date(weekStart);
-    next.setDate(weekStart.getDate() + index);
-    return next;
-  });
-}
-
-function formatDayLabel(date) {
-  return `${WEEKDAY_LABELS[date.getDay()]} ${date.getDate()}`;
+function getMonthData(year, month) {
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const daysInMonth = lastDay.getDate();
+  const startDayOfWeek = firstDay.getDay();
+  
+  const days = [];
+  
+  // Add empty cells for days before the first of the month
+  for (let i = 0; i < startDayOfWeek; i++) {
+    days.push(null);
+  }
+  
+  // Add actual days
+  for (let i = 1; i <= daysInMonth; i++) {
+    days.push(new Date(year, month, i));
+  }
+  
+  return {
+    days,
+    month,
+    year,
+    monthLabel: MONTH_LABELS[month],
+    daysInMonth,
+  };
 }
 
 function formatSelectedDay(dateKey) {
@@ -114,7 +123,10 @@ export default function CalendarScreen() {
   const bottomInset = Platform.OS === 'android' ? 24 : 16;
   const currentUser = auth.currentUser;
 
-  const [selectedDateKey, setSelectedDateKey] = useState(toDateKey(new Date()));
+  const today = new Date();
+  const [currentMonth, setCurrentMonth] = useState(today.getMonth());
+  const [currentYear, setCurrentYear] = useState(today.getFullYear());
+  const [selectedDateKey, setSelectedDateKey] = useState(toDateKey(today));
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -123,13 +135,31 @@ export default function CalendarScreen() {
   const [editingEventId, setEditingEventId] = useState(null);
   const [form, setForm] = useState(() => ({
     ...emptyForm,
-    date: toDateKey(new Date()),
-    time: getDefaultTime(new Date()),
+    date: toDateKey(today),
+    time: getDefaultTime(today),
   }));
 
+  const monthData = useMemo(() => getMonthData(currentYear, currentMonth), [currentYear, currentMonth]);
+  const todayKey = useMemo(() => toDateKey(today), []);
   const selectedDate = useMemo(() => parseDateKey(selectedDateKey), [selectedDateKey]);
-  const weekDays = useMemo(() => buildWeekDays(selectedDate), [selectedDate]);
-  const todayKey = useMemo(() => toDateKey(new Date()), []);
+  
+  // Get events for all dates in the current month view
+  const eventsByDate = useMemo(() => {
+    const eventMap = {};
+    events.forEach(event => {
+      if (event.date) {
+        const eventDate = parseDateKey(event.date);
+        if (eventDate.getMonth() === currentMonth && eventDate.getFullYear() === currentYear) {
+          if (!eventMap[event.date]) {
+            eventMap[event.date] = [];
+          }
+          eventMap[event.date].push(event);
+        }
+      }
+    });
+    return eventMap;
+  }, [events, currentMonth, currentYear]);
+
   const selectedDayEvents = useMemo(() => {
     return events
       .filter((event) => event.date === selectedDateKey)
@@ -169,6 +199,28 @@ export default function CalendarScreen() {
       }));
     }
   }, [selectedDateKey, editingEventId]);
+
+  const navigateMonth = (direction) => {
+    let newMonth = currentMonth + direction;
+    let newYear = currentYear;
+    
+    if (newMonth < 0) {
+      newMonth = 11;
+      newYear--;
+    } else if (newMonth > 11) {
+      newMonth = 0;
+      newYear++;
+    }
+    
+    setCurrentMonth(newMonth);
+    setCurrentYear(newYear);
+  };
+
+  const goToToday = () => {
+    setCurrentMonth(today.getMonth());
+    setCurrentYear(today.getFullYear());
+    setSelectedDateKey(toDateKey(today));
+  };
 
   const openCreateModal = () => {
     setEditingEventId(null);
@@ -268,47 +320,87 @@ export default function CalendarScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
         <Text style={styles.kicker}>My Calendar</Text>
-        <Text style={styles.title}>Plan the week</Text>
+        <Text style={styles.title}>Monthly Overview</Text>
         <Text style={styles.subtitle}>
-          Keep the important blocks visible so the day feels organized, not crowded.
+          See your month at a glance. Tap any day to view or add events.
         </Text>
 
-        <DashboardCard title="Week View">
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.dayRow}>
-              {weekDays.map((day) => {
-                const key = toDateKey(day);
-                const active = key === selectedDateKey;
+        <DashboardCard title="Month View">
+          {/* Month Navigation */}
+          <View style={styles.monthHeader}>
+            <TouchableOpacity onPress={() => navigateMonth(-1)} style={styles.navButton}>
+              <Feather name="chevron-left" size={20} color={Colors.gold} />
+            </TouchableOpacity>
+            <Text style={styles.monthTitle}>
+              {monthData.monthLabel} {monthData.year}
+            </Text>
+            <TouchableOpacity onPress={() => navigateMonth(1)} style={styles.navButton}>
+              <Feather name="chevron-right" size={20} color={Colors.gold} />
+            </TouchableOpacity>
+          </View>
 
-                return (
-                  <TouchableOpacity
-                    key={key}
-                    style={[styles.dayChip, active && styles.dayChipActive]}
-                    onPress={() => setSelectedDateKey(key)}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={[styles.dayText, active && styles.dayTextActive]}>
-                      {formatDayLabel(day)}
-                    </Text>
-                    <Text style={[styles.dayNumber, active && styles.dayTextActive]}>
-                      {day.getDate()}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </ScrollView>
+          {/* Weekday Headers */}
+          <View style={styles.weekdayRow}>
+            {WEEKDAY_LABELS.map((label) => (
+              <View key={label} style={styles.weekdayCell}>
+                <Text style={styles.weekdayText}>{label}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Calendar Grid */}
+          <View style={styles.calendarGrid}>
+            {monthData.days.map((day, index) => {
+              if (!day) {
+                return <View key={`empty-${index}`} style={styles.dayCell} />;
+              }
+              
+              const key = toDateKey(day);
+              const isToday = key === todayKey;
+              const isSelected = key === selectedDateKey;
+              const dayEvents = eventsByDate[key] || [];
+              
+              return (
+                <TouchableOpacity
+                  key={key}
+                  style={[
+                    styles.dayCell,
+                    isSelected && styles.dayCellSelected,
+                    isToday && styles.dayCellToday,
+                  ]}
+                  onPress={() => setSelectedDateKey(key)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.dayCellText,
+                    isSelected && styles.dayCellTextSelected,
+                    isToday && styles.dayCellTextToday,
+                  ]}>
+                    {day.getDate()}
+                  </Text>
+                  
+                  {/* Event Dots */}
+                  {dayEvents.length > 0 && (
+                    <View style={styles.eventDots}>
+                      {dayEvents.slice(0, 3).map((_, i) => (
+                        <View key={i} style={styles.eventDot} />
+                      ))}
+                      {dayEvents.length > 3 && (
+                        <Text style={styles.moreEventsText}>+{dayEvents.length - 3}</Text>
+                      )}
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         </DashboardCard>
 
         <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.sectionTitle}>Agenda</Text>
-            <Text style={styles.sectionSubtitle}>{formatSelectedDay(selectedDateKey)}</Text>
-          </View>
           <View style={styles.headerActions}>
             <TouchableOpacity
               style={styles.secondaryPill}
-              onPress={() => setSelectedDateKey(todayKey)}
+              onPress={goToToday}
               activeOpacity={0.85}
             >
               <Text style={styles.secondaryPillText}>Today</Text>
@@ -319,6 +411,8 @@ export default function CalendarScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        <Text style={styles.sectionTitle}>Events for {formatSelectedDay(selectedDateKey)}</Text>
 
         {loading ? (
           <DashboardCard style={styles.eventCard}>
@@ -500,44 +594,99 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 18,
   },
-  dayRow: {
+  // Month Navigation
+  monthHeader: {
     flexDirection: 'row',
-    gap: 12,
-  },
-  dayChip: {
-    width: 72,
-    paddingVertical: 14,
-    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  navButton: {
+    padding: 8,
+    borderRadius: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.06)',
   },
-  dayChipActive: {
-    backgroundColor: 'rgba(212, 175, 55, 0.14)',
-    borderColor: 'rgba(212, 175, 55, 0.3)',
+  monthTitle: {
+    color: Colors.white,
+    fontSize: 16,
+    fontWeight: '700',
   },
-  dayText: {
-    color: Colors.gray,
-    fontSize: 12,
-    fontWeight: '600',
+  // Weekday Headers
+  weekdayRow: {
+    flexDirection: 'row',
     marginBottom: 8,
   },
-  dayTextActive: {
+  weekdayCell: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  weekdayText: {
     color: Colors.gold,
+    fontSize: 12,
+    fontWeight: '700',
   },
-  dayNumber: {
+  // Calendar Grid
+  calendarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  dayCell: {
+    width: '14.28%',
+    aspectRatio: 0.85,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  dayCellSelected: {
+    backgroundColor: 'rgba(212, 175, 55, 0.2)',
+    borderWidth: 1,
+    borderColor: Colors.gold,
+  },
+  dayCellToday: {
+    backgroundColor: 'rgba(212, 175, 55, 0.1)',
+  },
+  dayCellText: {
     color: Colors.white,
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 14,
+    fontWeight: '500',
   },
+  dayCellTextSelected: {
+    color: Colors.gold,
+    fontWeight: '700',
+  },
+  dayCellTextToday: {
+    color: Colors.gold,
+    fontWeight: '600',
+  },
+  // Event Dots
+  eventDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    gap: 2,
+  },
+  eventDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.gold,
+  },
+  moreEventsText: {
+    color: Colors.gray,
+    fontSize: 8,
+    marginLeft: 2,
+  },
+  // Header Row
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 6,
+    justifyContent: 'flex-end',
+    marginTop: 24,
     marginBottom: 12,
-    gap: 12,
   },
   headerActions: {
     flexDirection: 'row',
@@ -548,11 +697,7 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontSize: 18,
     fontWeight: 'bold',
-  },
-  sectionSubtitle: {
-    color: Colors.gray,
-    fontSize: 13,
-    marginTop: 4,
+    marginBottom: 12,
   },
   addButton: {
     flexDirection: 'row',
