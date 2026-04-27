@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
   SafeAreaView,
   ScrollView,
@@ -8,6 +8,8 @@ import {
   TouchableOpacity,
   View,
   Platform,
+  Animated,
+  Easing,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -63,6 +65,95 @@ function formatEventDate(value) {
   }).format(date);
 }
 
+// Animated Components
+const AnimatedCard = ({ children, index, style }) => {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 600,
+        delay: index * 200,
+        useNativeDriver: true,
+        easing: Easing.out(Easing.ease),
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 600,
+        delay: index * 200,
+        useNativeDriver: true,
+        easing: Easing.out(Easing.back(1.2)),
+      }),
+    ]).start();
+  }, []);
+
+  return (
+    <Animated.View
+      style={[
+        {
+          opacity: fadeAnim,
+          transform: [{ translateY: slideAnim }],
+        },
+        style,
+      ]}
+    >
+      {children}
+    </Animated.View>
+  );
+};
+
+const AnimatedPriorityRow = ({ item, index }) => {
+  const scaleAnim = useRef(new Animated.Value(0)).current;
+  const opacityAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        delay: 300 + index * 100,
+        friction: 6,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacityAnim, {
+        toValue: 1,
+        duration: 400,
+        delay: 300 + index * 100,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
+
+  return (
+    <Animated.View
+      style={[
+        styles.priorityRow,
+        {
+          opacity: opacityAnim,
+          transform: [{ scale: scaleAnim }],
+        },
+      ]}
+    >
+      <View style={styles.priorityDotWrap}>
+        <View
+          style={[
+            styles.priorityDot,
+            item.priority === 'High'
+              ? styles.priorityDotHigh
+              : item.priority === 'Medium'
+                ? styles.priorityDotMedium
+                : styles.priorityDotLow,
+          ]}
+        />
+        <Text style={styles.priorityLabel}>{item.priority}</Text>
+      </View>
+      <Text style={styles.priorityCount}>{item.count} task{item.count === 1 ? '' : 's'}</Text>
+    </Animated.View>
+  );
+};
+
 export default function DashboardScreen() {
   const topInset = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 0) : 0;
   const bottomInset = Platform.OS === 'android' ? 24 : 16;
@@ -73,6 +164,11 @@ export default function DashboardScreen() {
   const [latestContemplation, setLatestContemplation] = useState(null);
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [loadingContemplations, setLoadingContemplations] = useState(true);
+
+  // Animation values for header
+  const headerFadeAnim = useRef(new Animated.Value(0)).current;
+  const headerSlideAnim = useRef(new Animated.Value(-20)).current;
+  const avatarPulseAnim = useRef(new Animated.Value(1)).current;
 
   const displayName = currentUser?.displayName?.trim() || currentUser?.email?.split('@')?.[0] || '';
   const showWelcomeBack = Boolean(currentUser);
@@ -91,6 +187,46 @@ export default function DashboardScreen() {
       count: counts[priority] ?? 0,
     }));
   }, [tasks]);
+
+  // Header animation
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(headerFadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+        easing: Easing.out(Easing.ease),
+      }),
+      Animated.timing(headerSlideAnim, {
+        toValue: 0,
+        duration: 800,
+        useNativeDriver: true,
+        easing: Easing.out(Easing.back(1.5)),
+      }),
+    ]).start();
+  }, []);
+
+  // Avatar pulse animation
+  useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(avatarPulseAnim, {
+          toValue: 1.05,
+          duration: 2000,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(avatarPulseAnim, {
+          toValue: 1,
+          duration: 2000,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -184,96 +320,124 @@ export default function DashboardScreen() {
     >
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
-      <LinearGradient
-        colors={[Colors.primary, Colors.secondary]}
-        style={styles.header}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
+      <Animated.View
+        style={[
+          {
+            opacity: headerFadeAnim,
+            transform: [{ translateY: headerSlideAnim }],
+          },
+        ]}
       >
-        <View style={styles.headerTop}>
-          <View style={styles.headerCopy}>
-            <Text style={styles.greeting}>{showWelcomeBack ? 'Welcome back,' : 'Welcome!'}</Text>
-            {showWelcomeBack ? <Text style={styles.name}>{displayName || 'User'}</Text> : null}
-          </View>
-          <View style={styles.headerIcons}>
-            <TouchableOpacity style={styles.iconButton}>
-              <Feather name="bell" size={22} color={Colors.gold} />
-              <View style={styles.notificationBadge} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.avatarContainer}>
-              <Text style={styles.avatarText}>
-                {showWelcomeBack ? getInitials(displayName || currentUser?.email || '') : '!'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </LinearGradient>
-
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        <DashboardCard title="Task Preview">
-          {loadingTasks ? (
-            <Text style={styles.helperText}>Loading tasks...</Text>
-          ) : (
-            <View style={styles.priorityList}>
-              {taskCounts.map((item) => (
-                <View key={item.priority} style={styles.priorityRow}>
-                  <View style={styles.priorityDotWrap}>
-                    <View
-                      style={[
-                        styles.priorityDot,
-                        item.priority === 'High'
-                          ? styles.priorityDotHigh
-                          : item.priority === 'Medium'
-                            ? styles.priorityDotMedium
-                            : styles.priorityDotLow,
-                      ]}
-                    />
-                    <Text style={styles.priorityLabel}>{item.priority}</Text>
-                  </View>
-                  <Text style={styles.priorityCount}>{item.count} task{item.count === 1 ? '' : 's'}</Text>
-                </View>
-              ))}
+        <LinearGradient
+          colors={[Colors.primary, Colors.secondary]}
+          style={styles.header}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <View style={styles.headerTop}>
+            <View style={styles.headerCopy}>
+              <Text style={styles.greeting}>{showWelcomeBack ? 'Welcome back,' : 'Welcome!'}</Text>
+              {showWelcomeBack ? <Text style={styles.name}>{displayName || 'User'}</Text> : null}
             </View>
-          )}
-        </DashboardCard>
-
-        <DashboardCard title="Upcoming Events">
-          {!currentUser ? (
-            <Text style={styles.helperText}>You need to login to see upcoming event!</Text>
-          ) : upcomingEvents.length === 0 ? (
-            <Text style={styles.helperText}>No upcoming events in the next month.</Text>
-          ) : (
-            upcomingEvents.map((event) => (
-              <View key={event.id} style={styles.eventRow}>
-                <View style={styles.eventDot} />
-                <View style={styles.eventBody}>
-                  <Text style={styles.eventTitle}>{event.title}</Text>
-                  <Text style={styles.eventMeta}>
-                    {formatEventDate(event.startAt)}{event.detail ? ` • ${event.detail}` : ''}
+            <View style={styles.headerIcons}>
+              <TouchableOpacity style={styles.iconButton} activeOpacity={0.7}>
+                <Feather name="bell" size={22} color={Colors.gold} />
+                <View style={styles.notificationBadge}>
+                  <View style={styles.notificationBadgeInner} />
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity activeOpacity={0.8}>
+                <Animated.View
+                  style={[
+                    styles.avatarContainer,
+                    {
+                      transform: [{ scale: avatarPulseAnim }],
+                    },
+                  ]}
+                >
+                  <Text style={styles.avatarText}>
+                    {showWelcomeBack ? getInitials(displayName || currentUser?.email || '') : '!'}
                   </Text>
-                </View>
-              </View>
-            ))
-          )}
-        </DashboardCard>
-
-        <DashboardCard title="Last Contemplation">
-          {loadingContemplations ? (
-            <Text style={styles.helperText}>Loading contemplation...</Text>
-          ) : latestContemplation ? (
-            <View>
-              <View style={styles.contemplationHeader}>
-                <Text style={styles.contemplationTitle}>{latestContemplation.title}</Text>
-                <View style={styles.contemplationBadge}>
-                  <Text style={styles.contemplationBadgeText}>{latestContemplation.mood}</Text>
-                </View>
-              </View>
-              <Text style={styles.contemplationBody}>{latestContemplation.contemplation}</Text>
+                </Animated.View>
+              </TouchableOpacity>
             </View>
-          ) : (
-            <Text style={styles.helperText}>No contemplation saved yet.</Text>
-          )}
-        </DashboardCard>
+          </View>
+        </LinearGradient>
+      </Animated.View>
+
+      <ScrollView
+        style={styles.content}
+        showsVerticalScrollIndicator={false}
+        bounces={true}
+        decelerationRate="normal"
+      >
+        <AnimatedCard index={0}>
+          <DashboardCard title="Task Preview">
+            {loadingTasks ? (
+              <View style={styles.loadingContainer}>
+                <View style={styles.loadingShimmer} />
+              </View>
+            ) : (
+              <View style={styles.priorityList}>
+                {taskCounts.map((item, index) => (
+                  <AnimatedPriorityRow key={item.priority} item={item} index={index} />
+                ))}
+              </View>
+            )}
+          </DashboardCard>
+        </AnimatedCard>
+
+        <AnimatedCard index={1}>
+          <DashboardCard title="Upcoming Events">
+            {!currentUser ? (
+              <Text style={styles.helperText}>You need to login to see upcoming event!</Text>
+            ) : upcomingEvents.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Feather name="calendar" size={32} color={Colors.gray} style={styles.emptyIcon} />
+                <Text style={styles.helperText}>No upcoming events in the next month.</Text>
+              </View>
+            ) : (
+              upcomingEvents.map((event) => (
+                <TouchableOpacity key={event.id} style={styles.eventRow} activeOpacity={0.7}>
+                  <View style={styles.eventDot}>
+                    <View style={styles.eventDotInner} />
+                  </View>
+                  <View style={styles.eventBody}>
+                    <Text style={styles.eventTitle}>{event.title}</Text>
+                    <Text style={styles.eventMeta}>
+                      {formatEventDate(event.startAt)}{event.detail ? ` • ${event.detail}` : ''}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))
+            )}
+          </DashboardCard>
+        </AnimatedCard>
+
+        <AnimatedCard index={2}>
+          <DashboardCard title="Last Contemplation">
+            {loadingContemplations ? (
+              <View style={styles.loadingContainer}>
+                <View style={styles.loadingShimmer} />
+              </View>
+            ) : latestContemplation ? (
+              <View>
+                <View style={styles.contemplationHeader}>
+                  <Text style={styles.contemplationTitle}>{latestContemplation.title}</Text>
+                  <View style={styles.contemplationBadge}>
+                    <Text style={styles.contemplationBadgeText}>{latestContemplation.mood}</Text>
+                  </View>
+                </View>
+                <Text style={styles.contemplationBody}>{latestContemplation.contemplation}</Text>
+              </View>
+            ) : (
+              <View style={styles.emptyState}>
+                <Feather name="book-open" size={32} color={Colors.gray} style={styles.emptyIcon} />
+                <Text style={styles.helperText}>No contemplation saved yet.</Text>
+              </View>
+            )}
+          </DashboardCard>
+        </AnimatedCard>
 
         <View style={styles.bottomSpacer} />
       </ScrollView>
@@ -292,6 +456,14 @@ const styles = StyleSheet.create({
     paddingBottom: 25,
     borderBottomLeftRadius: 30,
     borderBottomRightRadius: 30,
+    shadowColor: Colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
   },
   headerTop: {
     flexDirection: 'row',
@@ -306,12 +478,16 @@ const styles = StyleSheet.create({
     color: Colors.gray,
     fontSize: 14,
     marginBottom: 4,
+    letterSpacing: 0.3,
   },
   name: {
     color: Colors.white,
     fontSize: 24,
     fontWeight: 'bold',
     letterSpacing: 0.5,
+    textShadowColor: 'rgba(0, 0, 0, 0.2)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   headerIcons: {
     flexDirection: 'row',
@@ -320,14 +496,23 @@ const styles = StyleSheet.create({
   },
   iconButton: {
     position: 'relative',
+    transform: [{ scale: 1 }],
   },
   notificationBadge: {
     position: 'absolute',
     top: -2,
     right: -2,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  notificationBadgeInner: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: Colors.accent,
   },
   avatarContainer: {
@@ -337,6 +522,14 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.gold,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: Colors.gold,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
   avatarText: {
     color: Colors.primary,
@@ -352,6 +545,7 @@ const styles = StyleSheet.create({
     color: Colors.gray,
     fontSize: 13,
     lineHeight: 19,
+    textAlign: 'center',
   },
   priorityList: {
     gap: 12,
@@ -360,6 +554,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    padding: 8,
+    borderRadius: 8,
   },
   priorityDotWrap: {
     flexDirection: 'row',
@@ -370,6 +567,14 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
   },
   priorityDotHigh: {
     backgroundColor: Colors.warning,
@@ -390,19 +595,36 @@ const styles = StyleSheet.create({
     color: Colors.gray,
     fontSize: 13,
     fontWeight: '600',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   eventRow: {
     flexDirection: 'row',
     gap: 12,
     alignItems: 'flex-start',
     marginBottom: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    padding: 10,
+    borderRadius: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: Colors.gold,
   },
   eventDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: 'rgba(212, 175, 55, 0.2)',
+    marginTop: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  eventDotInner: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: Colors.gold,
-    marginTop: 5,
   },
   eventBody: {
     flex: 1,
@@ -432,22 +654,49 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   contemplationBadge: {
-    backgroundColor: 'rgba(212, 175, 55, 0.12)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    backgroundColor: 'rgba(212, 175, 55, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.3)',
   },
   contemplationBadgeText: {
     color: Colors.gold,
     fontSize: 11,
     fontWeight: '700',
+    letterSpacing: 0.5,
   },
   contemplationBody: {
     color: Colors.gray,
     fontSize: 13,
-    lineHeight: 19,
+    lineHeight: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    padding: 12,
+    borderRadius: 8,
+    borderLeftWidth: 2,
+    borderLeftColor: Colors.gold,
   },
   bottomSpacer: {
     height: 30,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 20,
+    gap: 12,
+  },
+  emptyIcon: {
+    opacity: 0.4,
+  },
+  loadingContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  loadingShimmer: {
+    width: '80%',
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 2,
+    overflow: 'hidden',
   },
 });
