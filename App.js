@@ -4,7 +4,7 @@ import { Feather } from '@expo/vector-icons';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { onAuthStateChanged } from 'firebase/auth';
 import { Colors } from './src/theme/colors';
-import { auth } from './src/services/firebaseService';
+import { auth, firebaseConfigError, missingFirebaseConfigKeys } from './src/services/firebaseService';
 import AuthScreen from './src/screens/AuthScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
 import NotesScreen from './src/screens/NotesScreen';
@@ -30,11 +30,16 @@ const screens = {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [currentUser, setCurrentUser] = useState(auth.currentUser);
-  const [authReady, setAuthReady] = useState(false);
+  const [currentUser, setCurrentUser] = useState(auth?.currentUser ?? null);
+  const [authReady, setAuthReady] = useState(!auth || Boolean(firebaseConfigError));
   const ActiveScreen = screens[activeTab];
 
   useEffect(() => {
+    if (!auth) {
+      setAuthReady(true);
+      return undefined;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setAuthReady(true);
@@ -42,6 +47,22 @@ export default function App() {
 
     return unsubscribe;
   }, []);
+
+  if (firebaseConfigError) {
+    return (
+      <View style={styles.loadingShell}>
+        <StatusBar style="light" />
+        <Feather name="alert-triangle" size={28} color={Colors.warning} />
+        <Text style={styles.errorTitle}>Firebase config is missing</Text>
+        <Text style={styles.errorText}>
+          This APK was built without the required `EXPO_PUBLIC_FIREBASE_*` variables.
+        </Text>
+        <Text style={styles.errorText}>
+          Missing keys: {missingFirebaseConfigKeys.join(', ')}
+        </Text>
+      </View>
+    );
+  }
 
   if (!authReady) {
     return (
@@ -114,6 +135,18 @@ const styles = StyleSheet.create({
     color: Colors.gray,
     fontSize: 14,
     fontWeight: '500',
+  },
+  errorTitle: {
+    color: Colors.white,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  errorText: {
+    color: Colors.gray,
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: 'center',
+    paddingHorizontal: 28,
   },
   screenArea: {
     flex: 1,

@@ -1,6 +1,6 @@
-import { initializeApp } from 'firebase/app';
+import { getApp, getApps, initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
-import { getReactNativePersistence, initializeAuth } from 'firebase/auth';
+import { getAuth, getReactNativePersistence, initializeAuth } from 'firebase/auth';
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
 
 const firebaseConfig = {
@@ -13,22 +13,58 @@ const firebaseConfig = {
   measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
-const requiredKeys = Object.entries(firebaseConfig)
+const requiredConfig = {
+  apiKey: firebaseConfig.apiKey,
+  authDomain: firebaseConfig.authDomain,
+  projectId: firebaseConfig.projectId,
+  storageBucket: firebaseConfig.storageBucket,
+  messagingSenderId: firebaseConfig.messagingSenderId,
+  appId: firebaseConfig.appId,
+};
+
+const missingFirebaseConfigKeys = Object.entries(requiredConfig)
   .filter(([, value]) => !value)
   .map(([key]) => key);
 
-if (requiredKeys.length > 0) {
-  throw new Error(`Missing Firebase environment variables: ${requiredKeys.join(', ')}`);
+const firebaseConfigError =
+  missingFirebaseConfigKeys.length > 0
+    ? `Missing Firebase environment variables: ${missingFirebaseConfigKeys.join(', ')}`
+    : '';
+
+const app = firebaseConfigError
+  ? null
+  : getApps().length > 0
+    ? getApp()
+    : initializeApp(firebaseConfig);
+
+const db = app ? getFirestore(app) : null;
+
+let auth = null;
+
+if (app) {
+  try {
+    auth = initializeAuth(app, {
+      persistence: getReactNativePersistence(ReactNativeAsyncStorage),
+    });
+  } catch {
+    auth = getAuth(app);
+  }
 }
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(ReactNativeAsyncStorage),
-});
-
 function getFirestoreInstance() {
+  if (!db) {
+    throw new Error(firebaseConfigError || 'Firebase Firestore is not initialized.');
+  }
+
   return db;
 }
 
-export { app, auth, db, getFirestoreInstance };
+export {
+  app,
+  auth,
+  db,
+  firebaseConfig,
+  firebaseConfigError,
+  getFirestoreInstance,
+  missingFirebaseConfigKeys,
+};
